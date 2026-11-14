@@ -1,7 +1,11 @@
 import { buildApp } from "./app.js";
 import { config } from "./config.js";
+import { installProxy } from "./proxy.js";
 
+const proxyInstalled = await installProxy(config.proxyUrl);
 const app = await buildApp();
+
+if (proxyInstalled) app.log.info("outbound proxy enabled");
 
 try {
   await app.listen({ host: config.host, port: config.port });

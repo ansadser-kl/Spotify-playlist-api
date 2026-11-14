@@ -1,6 +1,6 @@
 import { config, DEFAULTS } from "./config.js";
 import { Semaphore, TTLCache, singleFlight } from "./cache.js";
-import { SessionPool } from "./session.js";
+import { Session, SessionPool } from "./session.js";
 
 export class UpstreamError extends Error {
   constructor(message, { status = 502, code = "upstream_error", retryable = false } = {}) {
@@ -364,6 +364,24 @@ export class Upstream {
       this.pool.sessions.map((s) => s.ensureRequestToken())
     );
     return results.filter((r) => r.status === "fulfilled").length;
+  }
+
+  /** Deep health check: can this host reach the upstream at all? */
+  async diagnose() {
+    const session = new Session(999);
+    const [probe, ip] = await Promise.all([
+      session.probe().catch((err) => ({ error: err.message })),
+      fetch("https://api.ipify.org?format=json", { signal: AbortSignal.timeout(5000) })
+        .then((r) => r.json())
+        .then((j) => j.ip)
+        .catch(() => null),
+    ]);
+    return {
+      upstream_base: config.upstreamBase,
+      proxy_enabled: Boolean(config.proxyUrl),
+      egress_ip: ip,
+      ...probe,
+    };
   }
 
   stats() {

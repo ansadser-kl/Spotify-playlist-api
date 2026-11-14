@@ -139,6 +139,7 @@ export async function buildApp() {
     version: "0.2.0",
     endpoints: [
       "GET /health",
+      "GET /api/diagnose",
       "GET /api/playlist?url=<spotify url>",
       "GET /api/download?url=<track url>[&redirect=1]",
       "GET /api/download/playlist?url=<playlist url>[&wait=1]",
@@ -157,6 +158,9 @@ export async function buildApp() {
     cache: cache.stats(),
     ...upstream.stats(),
   }));
+
+  // Tells you whether this host can actually reach the upstream (IP blocks etc).
+  app.get("/api/diagnose", async () => upstream.diagnose());
 
   app.get("/v1/playlist/:id", async (request, reply) =>
     servePlaylist(request, reply, request.params.id)

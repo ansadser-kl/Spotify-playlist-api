@@ -9,6 +9,8 @@ export const config = {
   logLevel: process.env.LOG_LEVEL ?? "info",
 
   upstreamBase: (process.env.UPSTREAM_BASE ?? "https://spotisaver.net").replace(/\/$/, ""),
+  // Outbound proxy for datacenter hosts blocked by upstream Cloudflare.
+  proxyUrl: process.env.PROXY_URL ?? process.env.HTTPS_PROXY ?? "",
   userAgent:
     process.env.USER_AGENT ??
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36",

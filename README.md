@@ -29,6 +29,7 @@ Requires Node.js >= 20 (uses global `fetch`, no native builds).
 | Method | Path | Description |
 | --- | --- | --- |
 | GET | `/health` | Status, cache stats, session pool state, wire config |
+| GET | `/api/diagnose` | Upstream reachability (page/token status, egress IP, CF challenge) |
 | GET | `/api/playlist?url=` | **Recommended** — playlist, album or track URL; type auto-detected, includes download links |
 | GET | `/api/download?url=` | Direct MP3 link for one track (`&redirect=1` = 302 to the file) |
 | GET | `/api/download/playlist?url=` | Start a zip task (`&wait=1` polls up to `DOWNLOAD_WAIT_MS`) |
@@ -86,6 +87,27 @@ Because PHP sessions serialize, the API keeps a pool of independent sessions
 (`SESSION_POOL_SIZE`) and pins each playlist to one session so its signature can
 be reused. Concurrent identical requests collapse via single-flight.
 
+## Deploying on a datacenter host (Render/Railway/Fly)
+
+The upstream sits behind Cloudflare and sometimes challenges datacenter IPs.
+If `/api/diagnose` returns `page.status: 403` with `challenged: true`, the host
+is blocked before our auth flow even starts (`request_token_http_403`).
+
+Options, in order of preference:
+
+1. **Outbound proxy (recommended)** — set `PROXY_URL=http://user:pass@host:port`
+   to a residential/mobile proxy. `src/proxy.js` swaps in an undici
+   `ProxyAgent` for every upstream call.
+2. **Run on a residential connection** — e.g. the phone (Termux) with a
+   Cloudflare Tunnel, which also keeps the IP that already works.
+3. **Host with a residential/ISP IP** — most VPS providers are still flagged.
+
+`PROXY_URL` can also be `HTTPS_PROXY`, or run Node with
+`NODE_OPTIONS=--use-env-proxy` and `HTTPS_PROXY` set.
+
+Also set `API_KEYS` on public deployments — otherwise anyone can use your
+instance (and your upstream slots).
+
 ## Configuration
 
 All settings are env vars (see `.env.example`):
@@ -94,6 +116,7 @@ All settings are env vars (see `.env.example`):
 | --- | --- | --- |
 | `PORT` / `HOST` | `8080` / `0.0.0.0` | Listen address |
 | `UPSTREAM_BASE` | `https://spotisaver.net` | Upstream origin |
+| `PROXY_URL` | *(empty)* | Outbound proxy (`http://user:pass@host:port`) for blocked datacenter IPs |
 | `SESSION_POOL_SIZE` | `8` | Independent upstream sessions |
 | `MAX_CONCURRENT` | `16` | Global in-flight upstream cap |
 | `REQUEST_TIMEOUT_MS` | `25000` | Per upstream request |
