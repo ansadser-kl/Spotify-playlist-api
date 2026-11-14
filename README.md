@@ -100,6 +100,15 @@ Options, in order of preference:
    `ProxyAgent` for every upstream call.
 2. **Run on a residential connection** — e.g. the phone (Termux) with a
    Cloudflare Tunnel, which also keeps the IP that already works.
+
+   Quickest option with no account (temporary URL, dies with the session):
+
+   ```bash
+   ssh -R 80:127.0.0.1:8080 nokey@localhost.run
+   # prints something like https://<random>.app.lhr.life
+   ```
+
+   Or install `cloudflared` and run `cloudflared tunnel --url http://127.0.0.1:8080`.
 3. **Host with a residential/ISP IP** — most VPS providers are still flagged.
 
 `PROXY_URL` can also be `HTTPS_PROXY`, or run Node with
