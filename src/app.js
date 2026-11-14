@@ -417,6 +417,14 @@ export async function buildApp() {
       message: error.message,
       request_id: request.id,
     };
+    if (status === 403 || /request_token_http_403/.test(error.message)) {
+      payload.hint =
+        "Upstream Cloudflare is blocking this host's IP. Set PROXY_URL to a residential/mobile proxy, or run the API on a residential connection.";
+      payload.diagnose_url = "/api/diagnose";
+    }
+    if (payload.code === "no_slots") {
+      payload.hint = "Upstream download queue is full. Retry in a minute or use per-track downloads.";
+    }
     if (status >= 500) request.log.error({ err: error }, "request failed");
     reply.status(status).send(payload);
   });
