@@ -162,6 +162,56 @@ export async function buildApp() {
   // Tells you whether this host can actually reach the upstream (IP blocks etc).
   app.get("/api/diagnose", async () => upstream.diagnose());
 
+  // Internal relay for hosts whose egress IP is blocked by upstream Cloudflare.
+  // Render instances point their upstream calls here (residential tunnel).
+  app.all("/relay/*", async (request, reply) => {
+    if (config.relayKey && request.headers["x-relay-key"] !== config.relayKey) {
+      return reply.status(401).send({ code: "unauthorized", message: "invalid relay key" });
+    }
+
+    const upstreamPath = request.raw.url.slice("/relay".length);
+    const target = `${config.upstreamBase}${upstreamPath}`;
+    const skip = new Set([
+      "host", "connection", "content-length", "accept-encoding", "x-relay-key",
+      "cf-connecting-ip", "cf-ipcountry", "cf-ray", "cf-visitor",
+      "x-forwarded-for", "x-forwarded-proto", "x-real-ip",
+    ]);
+    const headers = {};
+    for (const [k, v] of Object.entries(request.headers)) {
+      if (!skip.has(k)) headers[k] = v;
+    }
+
+    let body;
+    if (!["GET", "HEAD"].includes(request.method)) {
+      body =
+        typeof request.body === "string" || Buffer.isBuffer(request.body)
+          ? request.body
+          : request.body === undefined
+            ? undefined
+            : JSON.stringify(request.body);
+    }
+
+    const res = await fetch(target, {
+      method: request.method,
+      headers,
+      body,
+      redirect: "manual",
+      signal: AbortSignal.timeout(config.requestTimeoutMs),
+    });
+
+    const outHeaders = {};
+    for (const [k, v] of res.headers) {
+      if (["content-encoding", "content-length", "transfer-encoding", "connection", "keep-alive"].includes(k)) continue;
+      outHeaders[k] = v;
+    }
+    const cookies = res.headers.getSetCookie?.();
+    if (cookies?.length) outHeaders["set-cookie"] = cookies;
+    for (const [k, v] of Object.entries(outHeaders)) reply.header(k, v);
+
+    const buf = Buffer.from(await res.arrayBuffer());
+    return reply.status(res.status).send(buf);
+  });
+
   app.get("/v1/playlist/:id", async (request, reply) =>
     servePlaylist(request, reply, request.params.id)
   );
@@ -296,11 +346,29 @@ export async function buildApp() {
     const id = parseId(input, type);
     const { data, cache: hit } = await upstream.playlist(id, { type, lang });
 
-    const started = await upstream.startPlaylistDownload(
-      data.playlist_info,
-      data.tracks ?? [],
-      { lang }
-    );
+    // Slots are shared globally upstream; retry the rejected request until the
+    // advertised retry_after elapses. `wait=1` may use the full budget.
+    const startDeadline = Date.now() + (wantFlag(request.query.wait) ? config.downloadWaitMs : 35_000);
+    let started;
+    for (;;) {
+      try {
+        started = await upstream.startPlaylistDownload(
+          data.playlist_info,
+          data.tracks ?? [],
+          { lang }
+        );
+        break;
+      } catch (err) {
+        if (err.code !== "no_slots") throw err;
+        const remainMs = startDeadline - Date.now();
+        const waitMs = Math.min((err.retryAfter || 25) * 1000, remainMs);
+        if (waitMs <= 0) {
+          err.statusCode = 429;
+          throw err;
+        }
+        await new Promise((r) => setTimeout(r, waitMs));
+      }
+    }
 
     const statusUrl = `${baseUrl(request)}/api/download/status?task_id=${encodeURIComponent(started.task_id)}`;
     const zipUrl = `${baseUrl(request)}/api/download/zip?task_id=${encodeURIComponent(started.task_id)}`;
@@ -424,6 +492,10 @@ export async function buildApp() {
     }
     if (payload.code === "no_slots") {
       payload.hint = "Upstream download queue is full. Retry in a minute or use per-track downloads.";
+    }
+    if (error.retryAfter) {
+      payload.retry_after_seconds = error.retryAfter;
+      reply.header("retry-after", String(error.retryAfter));
     }
     if (status >= 500) request.log.error({ err: error }, "request failed");
     reply.status(status).send(payload);

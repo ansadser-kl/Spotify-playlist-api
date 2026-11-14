@@ -58,9 +58,11 @@ export class Session {
   }
 
   async fetch(path, init = {}) {
-    const res = await fetch(`${config.upstreamBase}${path}`, {
+    const base = config.upstreamRelay || config.upstreamBase;
+    const relayHeaders = config.upstreamRelay ? { "x-relay-key": config.relayKey } : {};
+    const res = await fetch(`${base}${path}`, {
       ...init,
-      headers: this.headers(init.headers),
+      headers: this.headers({ ...relayHeaders, ...init.headers }),
       signal: init.signal ?? AbortSignal.timeout(config.requestTimeoutMs),
     });
     this.jar.absorb(res);

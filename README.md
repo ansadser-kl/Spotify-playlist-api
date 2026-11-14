@@ -111,6 +111,23 @@ Options, in order of preference:
    Or install `cloudflared` and run `cloudflared tunnel --url http://127.0.0.1:8080`.
 3. **Host with a residential/ISP IP** — most VPS providers are still flagged.
 
+### Temporary relay mode
+
+If you can run the API on a residential connection but still want the Render
+URL to work, set `UPSTREAM_RELAY` to a reachable relay. Render automatically
+uses a built-in relay (a Cloudflare quick tunnel) unless `UPSTREAM_RELAY` is
+overridden or set to empty.
+
+Every upstream request from Render then goes:
+
+```
+Render -> relay (/relay/*) -> spotisaver.net
+```
+
+The relay accepts only requests with `x-relay-key`. This is a stopgap: if the
+relay host/tunnel goes offline, Render returns upstream errors again. For a
+permanent deployment use `PROXY_URL` or host on a residential IP.
+
 `PROXY_URL` can also be `HTTPS_PROXY`, or run Node with
 `NODE_OPTIONS=--use-env-proxy` and `HTTPS_PROXY` set.
 
@@ -126,6 +143,8 @@ All settings are env vars (see `.env.example`):
 | `PORT` / `HOST` | `8080` / `0.0.0.0` | Listen address |
 | `UPSTREAM_BASE` | `https://spotisaver.net` | Upstream origin |
 | `PROXY_URL` | *(empty)* | Outbound proxy (`http://user:pass@host:port`) for blocked datacenter IPs |
+| `UPSTREAM_RELAY` | auto on Render | Transparent relay base URL for upstream calls (see below) |
+| `RELAY_KEY` | built-in | Shared key for the `/relay/*` endpoint |
 | `SESSION_POOL_SIZE` | `8` | Independent upstream sessions |
 | `MAX_CONCURRENT` | `16` | Global in-flight upstream cap |
 | `REQUEST_TIMEOUT_MS` | `25000` | Per upstream request |

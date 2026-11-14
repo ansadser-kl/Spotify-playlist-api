@@ -3,12 +3,23 @@ import "dotenv/config";
 const num = (v, d) => (v === undefined || v === "" ? d : Number(v));
 const list = (v) => (v ? v.split(",").map((s) => s.trim()).filter(Boolean) : []);
 
+// Temporary residential relay: Render's IP is challenged by upstream
+// Cloudflare, so Render instances forward upstream calls through this tunnel.
+// Disable with UPSTREAM_RELAY="" or by overriding UPSTREAM_RELAY.
+const RESIDENTIAL_RELAY = "https://chip-actually-universe-moved.trycloudflare.com/relay";
+const RELAY_KEY = "a4bb61312dacf5a932cb557fea088e2a";
+
 export const config = {
   host: process.env.HOST ?? "0.0.0.0",
   port: num(process.env.PORT, 8080),
   logLevel: process.env.LOG_LEVEL ?? "info",
 
   upstreamBase: (process.env.UPSTREAM_BASE ?? "https://spotisaver.net").replace(/\/$/, ""),
+  // On Render, transparently tunnel upstream calls through a residential host.
+  upstreamRelay: (
+    process.env.UPSTREAM_RELAY ?? (process.env.RENDER ? RESIDENTIAL_RELAY : "")
+  ).replace(/\/$/, ""),
+  relayKey: process.env.RELAY_KEY ?? RELAY_KEY,
   // Outbound proxy for datacenter hosts blocked by upstream Cloudflare.
   proxyUrl: process.env.PROXY_URL ?? process.env.HTTPS_PROXY ?? "",
   userAgent:

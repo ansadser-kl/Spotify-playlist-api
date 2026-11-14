@@ -3,11 +3,12 @@ import { Semaphore, TTLCache, singleFlight } from "./cache.js";
 import { Session, SessionPool } from "./session.js";
 
 export class UpstreamError extends Error {
-  constructor(message, { status = 502, code = "upstream_error", retryable = false } = {}) {
+  constructor(message, { status = 502, code = "upstream_error", retryable = false, retryAfter = null } = {}) {
     super(message);
     this.status = status;
     this.code = code;
     this.retryable = retryable;
+    this.retryAfter = retryAfter;
   }
 }
 
@@ -305,23 +306,33 @@ export class Upstream {
     });
     const data = await res.json().catch(() => ({}));
 
-    if (!data?.task_id) {
+    // Upstream sends a task_id even when the slot request is rejected:
+    // { status:"rejected", error:"No available slots", retry_after_seconds:25 }.
+    const rejected = data?.status === "rejected" || Boolean(data?.error);
+    if (rejected || !data?.task_id) {
+      const noSlots =
+        data?.error_code === "slots_unavailable" || /no available slots/i.test(data?.error ?? "");
       throw new UpstreamError(data?.error ?? `playlist download failed (${res.status})`, {
-        status: res.status === 429 ? 429 : 502,
-        code: data?.error === "No available slots" ? "no_slots" : "playlist_download_failed",
+        status: noSlots ? 429 : res.status === 429 ? 429 : 502,
+        code: noSlots ? "no_slots" : "playlist_download_failed",
         retryable: true,
+        retryAfter: Number(data?.retry_after_seconds) || null,
       });
     }
 
     this.tasks.set(String(data.task_id), {
       playlist_url: playlistInfo.external_url,
       lang,
+      sessionIndex: session.index,
     });
     return { task_id: String(data.task_id), ...data };
   }
 
   async downloadStatus(taskId) {
-    const session = this.pool.sessions[0];
+    // Upstream keeps download tasks in the PHP session that created them, so
+    // status/zip calls must go through that same session (not always index 0).
+    const meta = this.tasks.get(String(taskId));
+    const session = this.pool.sessions[meta?.sessionIndex ?? 0];
     const res = await session.fetch(
       `/api/get_download_status.php?task_id=${encodeURIComponent(taskId)}`
     );
@@ -333,7 +344,7 @@ export class Upstream {
     const meta = this.tasks.get(String(taskId));
     if (!meta) throw new UpstreamError("unknown task_id", { status: 404, code: "unknown_task" });
 
-    const session = this.pool.sessions[0];
+    const session = this.pool.sessions[meta?.sessionIndex ?? 0];
     const res = await session.fetch("/api/create_zip.php", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -378,6 +389,8 @@ export class Upstream {
     ]);
     return {
       upstream_base: config.upstreamBase,
+      relay_enabled: Boolean(config.upstreamRelay),
+      relay_url: config.upstreamRelay || null,
       proxy_enabled: Boolean(config.proxyUrl),
       egress_ip: ip,
       ...probe,
